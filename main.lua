@@ -14,11 +14,8 @@ local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local TextWidget = require("ui/widget/textwidget")
-local BottomContainer = require("ui/widget/container/bottomcontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local FrameContainer = require("ui/widget/container/framecontainer")
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local HorizontalSpan = require("ui/widget/horizontalspan")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local Blitbuffer = require("ffi/blitbuffer")
@@ -53,6 +50,9 @@ function FastReader:init()
     -- RSVP state
     self.rsvp_enabled = false
     self.rsvp_timer = nil
+    
+    -- Tap-to-launch RSVP settings
+    self.tap_to_launch_enabled = self.settings:readSetting("tap_to_launch_enabled") or false
     self.rsvp_speed = self.settings:readSetting("rsvp_speed") or 250  -- words per minute
     self.current_word_index = 1
     self.words = {}
@@ -61,6 +61,7 @@ function FastReader:init()
     -- Register for document events to setup callbacks when document is ready
     self.ui:registerPostReaderReadyCallback(function()
         self:setupProgressDisplay()
+        self:setupTapHandler()
     end)
 end
 
@@ -68,6 +69,7 @@ function FastReader:saveSettings()
     if self.settings then
         self.settings:saveSetting("progress_enabled", self.enabled)
         self.settings:saveSetting("rsvp_speed", self.rsvp_speed)
+        self.settings:saveSetting("tap_to_launch_enabled", self.tap_to_launch_enabled)
         self.settings:flush()
     end
 end
@@ -453,6 +455,29 @@ function FastReader:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Tap on Text to Launch RSVP"),
+                checked_func = function()
+                    return self.tap_to_launch_enabled
+                end,
+                callback = function()
+                    self.tap_to_launch_enabled = not self.tap_to_launch_enabled
+                    self:saveSettings()
+                    
+                    if self.tap_to_launch_enabled then
+                        UIManager:show(InfoMessage:new{
+                            text = _("Tap-to-launch RSVP enabled. Tap on text to start RSVP reading."),
+                            timeout = 3,
+                        })
+                    else
+                        UIManager:show(InfoMessage:new{
+                            text = _("Tap-to-launch RSVP disabled"),
+                            timeout = 2,
+                        })
+                    end
+                end,
+                help_text = _("When enabled, tapping on text will automatically start RSVP reading without going through the menu."),
+            },
+            {
                 text = _("RSVP Speed"),
                 sub_item_table = {
                     {
@@ -582,6 +607,80 @@ end
 function FastReader:onExit()
     -- Clean up when exiting
     self:stopRSVP()
+end
+
+function FastReader:setupTapHandler()
+    -- Always register the tap handler, but check settings in the handler itself
+    self.ui:registerTouchZones({
+        {
+            id = "fastreader_tap_to_launch",
+            ges = "tap",
+            screen_zone = {
+                ratio_x = 0, ratio_y = 0, 
+                ratio_w = 1, ratio_h = 1,  -- Full screen
+            },
+            overrides = {
+                -- Override specific tap handlers to intercept taps on text
+                "readerhighlight_tap",
+                "tap_top_left_corner",
+                "tap_top_right_corner", 
+                "tap_left_bottom_corner",
+                "tap_right_bottom_corner",
+                "tap_forward",
+                "tap_backward",
+            },
+            handler = function(ges)
+                return self:onTapToLaunchRSVP(ges)
+            end,
+        },
+    })
+    
+    logger.info("FastReader: Tap handler registered for RSVP launch")
+end
+
+function FastReader:onTapToLaunchRSVP(ges)
+    -- Only handle if tap-to-launch is enabled and RSVP is not already running
+    if not self.tap_to_launch_enabled or self.rsvp_enabled then
+        return false -- Let other handlers process this
+    end
+    
+    -- Check if we tapped on text area (similar to dictionary mode)
+    if self:isTapOnTextArea(ges) then
+        logger.info("FastReader: Tap on text area detected, launching RSVP")
+        self:startRSVP()
+        return true -- Consumed the tap, prevent other handlers
+    end
+    
+    return false -- Let other handlers process this tap
+end
+
+function FastReader:isTapOnTextArea(ges)
+    -- More sophisticated check based on DictionaryMode approach
+    local Screen = require("device").screen
+    local x, y = ges.pos.x, ges.pos.y
+    
+    -- Exclude UI areas (similar margins as used in KOReader)
+    local ui_margin = Screen:scaleBySize(30)
+    local footer_height = self.ui.view.footer_visible and self.ui.view.footer:getHeight() or 0
+    
+    -- Check if tap is in main reading area
+    if x > ui_margin and x < (Screen:getWidth() - ui_margin) and 
+       y > ui_margin and y < (Screen:getHeight() - footer_height - ui_margin) then
+        
+        -- Additional check: try to get text at tap position to confirm it's over text
+        if self.ui.document and self.ui.view then
+            local pos = self.ui.view:screenToPageTransform(ges.pos)
+            if pos then
+                local text_result = self.ui.document:getTextFromPositions(pos, pos)
+                if text_result and text_result.text and text_result.text:match("%S") then
+                    -- We have non-whitespace text at this position
+                    return true
+                end
+            end
+        end
+    end
+    
+    return false
 end
 
 return FastReader
