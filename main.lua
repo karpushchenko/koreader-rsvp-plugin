@@ -43,10 +43,6 @@ function FastReader:init()
     self.settings_file = DataStorage:getSettingsDir() .. "/fastreader.lua"
     self.settings = LuaSettings:open(self.settings_file)
     
-    -- Initialize progress display state
-    self.progress_widget = nil
-    self.enabled = self.settings:readSetting("progress_enabled") or false
-    
     -- RSVP state
     self.rsvp_enabled = false
     self.rsvp_timer = nil
@@ -60,71 +56,15 @@ function FastReader:init()
     
     -- Register for document events to setup callbacks when document is ready
     self.ui:registerPostReaderReadyCallback(function()
-        self:setupProgressDisplay()
         self:setupTapHandler()
     end)
 end
 
 function FastReader:saveSettings()
     if self.settings then
-        self.settings:saveSetting("progress_enabled", self.enabled)
         self.settings:saveSetting("rsvp_speed", self.rsvp_speed)
         self.settings:saveSetting("tap_to_launch_enabled", self.tap_to_launch_enabled)
         self.settings:flush()
-    end
-end
-
-function FastReader:setupProgressDisplay()
-    -- Don't auto-enable, let user activate manually
-end
-
-function FastReader:updateProgressDisplay()
-    if not self.enabled or not self.ui.document then
-        return
-    end
-    
-    local total_pages = 0
-    local current_page = 0
-    local progress_percent = 0
-
-    if self.ui.paging then
-        total_pages = self.ui.document:getPageCount()
-        current_page = self.ui.paging.current_page
-        progress_percent = current_page / total_pages * 100
-    elseif self.ui.rolling then
-        total_pages = self.ui.document:getPageCount()
-        current_page = self.ui.document:getCurrentPage()
-        progress_percent = current_page / total_pages * 100
-    else
-        return
-    end
-    
-    if current_page > 0 and total_pages > 0 then
-        local progress_text = string.format("%d / %d (%.1f%%)", current_page, total_pages, progress_percent)
-        
-        -- Use a simple InfoMessage that doesn't stay on screen
-        UIManager:show(InfoMessage:new{
-            text = progress_text,
-            timeout = 1.5,  -- show for 1.5 seconds then auto-hide
-        })
-    end
-end
-
-function FastReader:toggleProgressDisplay()
-    self.enabled = not self.enabled
-    self:saveSettings()
-    
-    if not self.enabled then
-        UIManager:show(InfoMessage:new{
-            text = _("FastReader progress display disabled"),
-        })
-    else
-        if self.ui.document then
-            self:updateProgressDisplay()
-            UIManager:show(InfoMessage:new{
-                text = _("FastReader progress display enabled"),
-            })
-        end
     end
 end
 
@@ -132,14 +72,25 @@ function FastReader:enableContinuousView()
     -- Save original view mode
     if self.ui.rolling then
         -- Already in continuous mode for reflowable documents
+        logger.info("FastReader: Document already in rolling mode")
         return true
     elseif self.ui.paging then
-        -- For paged documents, try to switch to continuous mode if possible
+        -- For paged documents, save original mode
         self.original_view_mode = "paging"
-        -- Note: This may not work for all document types
-        -- The actual implementation depends on document format support
+        logger.info("FastReader: Document in paging mode, will use page-by-page navigation")
+        
+        -- Try to enable scroll mode if document supports it
+        if self.ui.document.provider == "crengine" then
+            -- This is a reflowable document in paging mode, could switch to scroll
+            logger.info("FastReader: Could potentially switch to scroll mode for crengine document")
+        elseif self.ui.document.provider == "mupdf" then
+            -- PDF document - can't really switch to continuous, but we'll handle page navigation
+            logger.info("FastReader: PDF document - will use page-by-page navigation")
+        end
+        
         return true
     end
+    logger.warn("FastReader: Unknown document type")
     return false
 end
 
@@ -368,11 +319,6 @@ function FastReader:startRSVP()
     -- Show first word
     self:showRSVPWord(self.words[self.current_word_index])
     
-    UIManager:show(InfoMessage:new{
-        text = string.format(_("RSVP started at %d WPM (%d words found)"), self.rsvp_speed, #self.words),
-        timeout = 2,
-    })
-    
     logger.info("FastReader: RSVP started successfully")
 end
 
@@ -421,11 +367,87 @@ function FastReader:rsvpTick()
             self:rsvpTick()
         end)
     else
-        -- End of page reached
+        -- End of current page reached, try to go to next page
+        logger.info("FastReader: End of current page, attempting to go to next page")
+        self:goToNextPageAndContinueRSVP()
+    end
+end
+
+function FastReader:goToNextPageAndContinueRSVP()
+    -- Try to go to next page
+    local success = false
+    
+    if self.ui.paging then
+        -- For paged documents (PDF, DjVu, etc.)
+        local current_page = self.ui.paging.current_page
+        local total_pages = self.ui.document:getPageCount()
+        
+        if current_page < total_pages then
+            self.ui.paging:onGotoPage(current_page + 1)
+            success = true
+            logger.info("FastReader: Moved to page " .. (current_page + 1))
+        else
+            logger.info("FastReader: Already at last page")
+            self:stopRSVP()
+            UIManager:show(InfoMessage:new{
+                text = _("End of document reached"),
+                timeout = 2,
+            })
+            return
+        end
+        
+    elseif self.ui.rolling then
+        -- For reflowable documents (EPUB, FB2, etc.)
+        -- Try to scroll down by one screen
+        local Event = require("ui/event")
+        local ret = self.ui:handleEvent(Event:new("GotoViewRel", 1))
+        if ret then
+            success = true
+            logger.info("FastReader: Scrolled to next screen in rolling mode")
+        else
+            logger.info("FastReader: Could not scroll further in rolling mode")
+            self:stopRSVP()
+            UIManager:show(InfoMessage:new{
+                text = _("End of document reached"),
+                timeout = 2,
+            })
+            return
+        end
+    else
+        logger.warn("FastReader: Unknown document type")
         self:stopRSVP()
-        UIManager:show(InfoMessage:new{
-            text = _("End of page reached"),
-        })
+        return
+    end
+    
+    if success then
+        -- Small delay to let the page render, then extract words and continue
+        UIManager:scheduleIn(0.1, function()
+            self:continueRSVPWithNewPage()
+        end)
+    end
+end
+
+function FastReader:continueRSVPWithNewPage()
+    -- Extract words from new page/position
+    local new_words = self:extractWordsFromCurrentPage()
+    
+    if #new_words > 0 then
+        self.words = new_words
+        self.current_word_index = 1
+        logger.info("FastReader: Extracted " .. #new_words .. " words from new page")
+        
+        -- Continue with first word of new page
+        self:showRSVPWord(self.words[self.current_word_index])
+        
+        -- Schedule next tick
+        local interval = 60000 / self.rsvp_speed
+        self.rsvp_timer = UIManager:scheduleIn(interval / 1000, function()
+            self:rsvpTick()
+        end)
+    else
+        logger.warn("FastReader: No words extracted from new page, trying next page")
+        -- Try one more page if this one is empty
+        self:goToNextPageAndContinueRSVP()
     end
 end
 
@@ -442,12 +464,6 @@ function FastReader:addToMainMenu(menu_items)
         text = _("FastReader"),
         sorting_hint = "more_tools",
         sub_item_table = {
-            {
-                text = _("Toggle Progress Display"),
-                callback = function()
-                    self:toggleProgressDisplay()
-                end,
-            },
             {
                 text = _("Start/Stop RSVP"),
                 callback = function()
@@ -536,25 +552,8 @@ function FastReader:addToMainMenu(menu_items)
     }
 end
 
-function FastReader:onFastReaderAction()
-    self:toggleProgressDisplay()
-end
-
 function FastReader:onFastReaderRSVP()
     self:toggleRSVP()
-end
-
--- Event handlers for page/position updates
-function FastReader:onPageUpdate(pageno)
-    if self.enabled and self.ui.document and pageno then
-        self:updateProgressDisplay()
-    end
-end
-
-function FastReader:onPosUpdate(pos, pageno)
-    if self.enabled and self.ui.document and pageno then
-        self:updateProgressDisplay()
-    end
 end
 
 -- Key event handlers for RSVP control
