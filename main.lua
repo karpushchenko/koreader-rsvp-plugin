@@ -16,6 +16,7 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local FrameContainer = require("ui/widget/container/framecontainer")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local Blitbuffer = require("ffi/blitbuffer")
@@ -55,6 +56,11 @@ function FastReader:init()
     self.words = {}
     self.original_view_mode = nil
     
+    -- Position tracking for resume functionality
+    self.last_page_hash = nil -- Hash to identify current page content
+    self.last_word_index = 1  -- Last read word index on this page
+    self.show_position_indicator = self.settings:readSetting("show_position_indicator") or true
+    
     -- Register for document events to setup callbacks when document is ready
     self.ui:registerPostReaderReadyCallback(function()
         self:setupTapHandler()
@@ -65,6 +71,7 @@ function FastReader:saveSettings()
     if self.settings then
         self.settings:saveSetting("rsvp_speed", self.rsvp_speed)
         self.settings:saveSetting("tap_to_launch_enabled", self.tap_to_launch_enabled)
+        self.settings:saveSetting("show_position_indicator", self.show_position_indicator)
         self.settings:flush()
     end
 end
@@ -306,7 +313,20 @@ function FastReader:startRSVP()
     end
     
     self.rsvp_enabled = true
-    self.current_word_index = 1
+    
+    -- Check if we can resume from last position on this page
+    if self:shouldResumeFromLastPosition() then
+        self.current_word_index = self.last_word_index
+        logger.info("FastReader: Resuming from word " .. self.current_word_index .. " of " .. #self.words)
+        
+        -- Show position indicator if enabled
+        if self.show_position_indicator then
+            self:showPositionIndicator()
+        end
+    else
+        self.current_word_index = 1
+        logger.info("FastReader: Starting from beginning")
+    end
     
     -- Calculate interval in milliseconds
     local interval = 60000 / self.rsvp_speed  -- Convert WPM to milliseconds per word
@@ -329,6 +349,12 @@ function FastReader:stopRSVP()
     end
     
     logger.info("FastReader: Stopping RSVP mode")
+    
+    -- Save current position before stopping
+    if #self.words > 0 and self.current_word_index > 1 then
+        self:updateLastReadPosition()
+    end
+    
     self.rsvp_enabled = false
     
     -- Stop timer
@@ -342,6 +368,9 @@ function FastReader:stopRSVP()
         UIManager:close(self.rsvp_widget)
         self.rsvp_widget = nil
     end
+    
+    -- Remove position indicator if shown
+    self:hidePositionIndicator()
     
     -- Restore original view mode
     self:restoreOriginalView()
@@ -435,6 +464,9 @@ function FastReader:continueRSVPWithNewPage()
     if #new_words > 0 then
         self.words = new_words
         self.current_word_index = 1
+        -- Reset position tracking for new page
+        self.last_page_hash = nil
+        self.last_word_index = 1
         logger.info("FastReader: Extracted " .. #new_words .. " words from new page")
         
         -- Continue with first word of new page
@@ -493,6 +525,29 @@ function FastReader:addToMainMenu(menu_items)
                     end
                 end,
                 help_text = _("When enabled, tapping on text will automatically start RSVP reading without going through the menu."),
+            },
+            {
+                text = _("Show Reading Position"),
+                checked_func = function()
+                    return self.show_position_indicator
+                end,
+                callback = function()
+                    self.show_position_indicator = not self.show_position_indicator
+                    self:saveSettings()
+                    
+                    if self.show_position_indicator then
+                        UIManager:show(InfoMessage:new{
+                            text = _("Position indicator enabled. Shows reading progress when resuming."),
+                            timeout = 3,
+                        })
+                    else
+                        UIManager:show(InfoMessage:new{
+                            text = _("Position indicator disabled"),
+                            timeout = 2,
+                        })
+                    end
+                end,
+                help_text = _("When enabled, shows reading position indicator when resuming RSVP on the same page."),
             },
             {
                 text = _("RSVP Speed"),
@@ -740,6 +795,99 @@ function FastReader:isTapOnTextArea(ges)
     end
     
     return false
+end
+
+function FastReader:getCurrentPageHash()
+    -- Create a hash to identify current page content and position
+    local hash_data = ""
+    
+    if self.ui.paging then
+        -- For paged documents, use page number
+        hash_data = "page_" .. tostring(self.ui.paging.current_page)
+    elseif self.ui.rolling then
+        -- For rolling documents, use xpointer or position
+        local xpointer = self.ui.rolling:getBookLocation()
+        hash_data = "rolling_" .. tostring(xpointer or "unknown")
+    end
+    
+    -- Add document file path to make hash unique per document
+    if self.ui.document and self.ui.document.file then
+        hash_data = hash_data .. "_" .. self.ui.document.file
+    end
+    
+    return hash_data
+end
+
+function FastReader:shouldResumeFromLastPosition()
+    local current_hash = self:getCurrentPageHash()
+    return self.last_page_hash == current_hash and self.last_word_index > 1
+end
+
+function FastReader:updateLastReadPosition()
+    self.last_page_hash = self:getCurrentPageHash()
+    self.last_word_index = self.current_word_index
+    logger.info("FastReader: Updated last read position to word " .. self.last_word_index)
+end
+
+function FastReader:showPositionIndicator()
+    if not self.show_position_indicator or self.current_word_index <= 1 then
+        return
+    end
+    
+    -- Hide any existing indicator first
+    self:hidePositionIndicator()
+    
+    -- Create a small indicator showing reading progress
+    local progress_text = string.format("📖 %d/%d", self.current_word_index, #self.words)
+    local percentage = math.floor((self.current_word_index / #self.words) * 100)
+    
+    local indicator_widget = TextWidget:new{
+        text = progress_text,
+        face = Font:getFace("cfont", 16),
+        fgcolor = Blitbuffer.COLOR_WHITE,
+    }
+    
+    local indicator_frame = FrameContainer:new{
+        background = Blitbuffer.COLOR_DARK_GRAY,
+        bordersize = 1,
+        padding = 4,
+        margin = 0,
+        radius = 4,
+        indicator_widget,
+    }
+    
+    -- Position in top-right corner
+    local Screen = require("device").screen
+    local margin = Screen:scaleBySize(10)
+    
+    self.position_indicator_widget = OverlapGroup:new{
+        dimen = Geom:new{
+            x = Screen:getWidth() - indicator_frame:getSize().w - margin,
+            y = margin,
+            w = indicator_frame:getSize().w,
+            h = indicator_frame:getSize().h,
+        },
+        indicator_frame,
+    }
+    
+    UIManager:show(self.position_indicator_widget)
+    
+    -- Auto-hide after 3 seconds
+    self.indicator_timer = UIManager:scheduleIn(3, function()
+        self:hidePositionIndicator()
+    end)
+end
+
+function FastReader:hidePositionIndicator()
+    if self.position_indicator_widget then
+        UIManager:close(self.position_indicator_widget)
+        self.position_indicator_widget = nil
+    end
+    
+    if self.indicator_timer then
+        UIManager:unschedule(self.indicator_timer)
+        self.indicator_timer = nil
+    end
 end
 
 return FastReader
