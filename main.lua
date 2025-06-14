@@ -15,7 +15,10 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local CenterContainer = require("ui/widget/container/centercontainer")
+local LeftContainer = require("ui/widget/container/leftcontainer")
 local FrameContainer = require("ui/widget/container/framecontainer")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
@@ -61,6 +64,9 @@ function FastReader:init()
     self.last_word_index = 1  -- Last read word index on this page
     self.show_position_indicator = self.settings:readSetting("show_position_indicator") or true
     
+    -- Multi-word display settings
+    self.words_preview_count = self.settings:readSetting("words_preview_count") or 3 -- Show current + 2 next words
+    
     -- Register for document events to setup callbacks when document is ready
     self.ui:registerPostReaderReadyCallback(function()
         self:setupTapHandler()
@@ -72,6 +78,7 @@ function FastReader:saveSettings()
         self.settings:saveSetting("rsvp_speed", self.rsvp_speed)
         self.settings:saveSetting("tap_to_launch_enabled", self.tap_to_launch_enabled)
         self.settings:saveSetting("show_position_indicator", self.show_position_indicator)
+        self.settings:saveSetting("words_preview_count", self.words_preview_count)
         self.settings:flush()
     end
 end
@@ -228,26 +235,80 @@ function FastReader:extractWordsFromCurrentPage()
     return words
 end
 
-function FastReader:showRSVPWord(word)
-    if not word or word == "" then
+function FastReader:showRSVPWord(current_word)
+    if not current_word or current_word == "" then
         return
     end
     
-    -- Create a centered overlay for the RSVP word
+    -- Create multi-word display with current word highlighted
     local Screen = require("device").screen
-    local word_widget = TextWidget:new{
-        text = word,
-        face = Font:getFace("cfont", 32),
-        bold = true,
+    
+    -- Get preview words (current + next words)
+    local preview_words = {}
+    for i = 0, self.words_preview_count - 1 do
+        local word_index = self.current_word_index + i
+        if word_index <= #self.words then
+            table.insert(preview_words, self.words[word_index])
+        end
+    end
+    
+    -- Fixed dimensions for stable display - make it wider to fit more words
+    local fixed_width = math.floor(Screen:getWidth() * 0.9)
+    local fixed_height = Screen:scaleBySize(120)
+    local text_padding = Screen:scaleBySize(20)
+    
+    -- Create separate widgets for each word to avoid overlap
+    local word_widgets = {}
+    
+    for i, word in ipairs(preview_words) do
+        local is_current = (i == 1) -- First word is current
+        
+        -- Try using a more visible color for non-current words
+        local word_color = is_current and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_DARK_GRAY
+        
+        local word_widget = TextWidget:new{
+            text = word,
+            face = Font:getFace("cfont", is_current and 28 or 24),
+            bold = is_current,
+            fgcolor = word_color,
+        }
+        
+        table.insert(word_widgets, word_widget)
+        
+        -- Add space between words (except after last word)
+        if i < #preview_words then
+            table.insert(word_widgets, HorizontalSpan:new{ width = Screen:scaleBySize(15) })
+        end
+    end
+    
+    -- Create horizontal group containing all words
+    local words_group = HorizontalGroup:new{
+        align = "center",
     }
     
+    -- Add all word widgets to the group
+    for _, widget in ipairs(word_widgets) do
+        table.insert(words_group, widget)
+    end
+    
+    -- Left-aligned container with fixed width
     local frame = FrameContainer:new{
         background = Blitbuffer.COLOR_WHITE,
         bordersize = 2,
-        padding = 10,
-        word_widget,
+        padding = text_padding,
+        margin = 0,
+        width = fixed_width,
+        height = fixed_height,
+        LeftContainer:new{
+            dimen = Geom:new{
+                w = fixed_width - (text_padding * 2),
+                h = fixed_height - (text_padding * 2),
+            },
+            words_group,
+        },
     }
     
+    -- Center the fixed-width frame on screen
     local container = CenterContainer:new{
         dimen = Geom:new{
             w = Screen:getWidth(),
@@ -548,6 +609,38 @@ function FastReader:addToMainMenu(menu_items)
                     end
                 end,
                 help_text = _("When enabled, shows reading position indicator when resuming RSVP on the same page."),
+            },
+            {
+                text_func = function()
+                    return T(_("Preview Words: %1"), self.words_preview_count)
+                end,
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    local SpinWidget = require("ui/widget/spinwidget")
+                    local spin_widget = SpinWidget:new{
+                        title_text = _("RSVP Preview Words"),
+                        info_text = _("Number of words to show in RSVP widget (1-10)"),
+                        width = math.floor(Screen:getWidth() * 0.6),
+                        value = self.words_preview_count,
+                        value_min = 1,
+                        value_max = 10,
+                        value_step = 1,
+                        value_hold_step = 2,
+                        default_value = 3,
+                        unit = _("words"),
+                        callback = function(spin)
+                            self.words_preview_count = spin.value
+                            self:saveSettings()
+                            touchmenu_instance:updateItems()
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("Preview words set to %1"), self.words_preview_count),
+                                timeout = 2,
+                            })
+                        end
+                    }
+                    UIManager:show(spin_widget)
+                end,
+                help_text = _("Controls how many words are shown in the RSVP widget. The current word is highlighted, upcoming words are dimmed."),
             },
             {
                 text = _("RSVP Speed"),
