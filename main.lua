@@ -24,6 +24,7 @@ local logger = require("logger")
 local LuaSettings = require("luasettings")
 local DataStorage = require("datastorage")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local FastReader = WidgetContainer:extend{
     name = "fastreader",
@@ -497,52 +498,111 @@ function FastReader:addToMainMenu(menu_items)
                 text = _("RSVP Speed"),
                 sub_item_table = {
                     {
-                        text = _("150 WPM"),
+                        text_func = function()
+                            return T(_("Current: %1 WPM"), self.rsvp_speed)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(touchmenu_instance)
+                            local SpinWidget = require("ui/widget/spinwidget")
+                            local spin_widget = SpinWidget:new{
+                                title_text = _("RSVP Reading Speed"),
+                                info_text = _("Words per minute (50-1000)"),
+                                width = math.floor(Screen:getWidth() * 0.6),
+                                value = self.rsvp_speed,
+                                value_min = 50,
+                                value_max = 1000,
+                                value_step = 25,
+                                value_hold_step = 100,
+                                default_value = 250,
+                                unit = "WPM",
+                                callback = function(spin)
+                                    self.rsvp_speed = spin.value
+                                    self:saveSettings()
+                                    touchmenu_instance:updateItems()
+                                    UIManager:show(InfoMessage:new{
+                                        text = T(_("RSVP speed set to %1 WPM"), self.rsvp_speed),
+                                        timeout = 1,
+                                    })
+                                end
+                            }
+                            UIManager:show(spin_widget)
+                        end,
+                        separator = true,
+                    },
+                    {
+                        text = _("100 WPM (Very slow)"),
+                        callback = function()
+                            self.rsvp_speed = 100
+                            self:saveSettings()
+                            UIManager:show(InfoMessage:new{
+                                text = _("RSVP speed set to 100 WPM"),
+                                timeout = 1,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("150 WPM (Slow)"),
                         callback = function()
                             self.rsvp_speed = 150
                             self:saveSettings()
                             UIManager:show(InfoMessage:new{
                                 text = _("RSVP speed set to 150 WPM"),
+                                timeout = 1,
                             })
                         end,
                     },
                     {
-                        text = _("200 WPM"),
+                        text = _("200 WPM (Normal)"),
                         callback = function()
                             self.rsvp_speed = 200
                             self:saveSettings()
                             UIManager:show(InfoMessage:new{
                                 text = _("RSVP speed set to 200 WPM"),
+                                timeout = 1,
                             })
                         end,
                     },
                     {
-                        text = _("250 WPM"),
+                        text = _("250 WPM (Fast)"),
                         callback = function()
                             self.rsvp_speed = 250
                             self:saveSettings()
                             UIManager:show(InfoMessage:new{
                                 text = _("RSVP speed set to 250 WPM"),
+                                timeout = 1,
                             })
                         end,
                     },
                     {
-                        text = _("300 WPM"),
+                        text = _("300 WPM (Very fast)"),
                         callback = function()
                             self.rsvp_speed = 300
                             self:saveSettings()
                             UIManager:show(InfoMessage:new{
                                 text = _("RSVP speed set to 300 WPM"),
+                                timeout = 1,
                             })
                         end,
                     },
                     {
-                        text = _("400 WPM"),
+                        text = _("400 WPM (Extreme)"),
                         callback = function()
                             self.rsvp_speed = 400
                             self:saveSettings()
                             UIManager:show(InfoMessage:new{
                                 text = _("RSVP speed set to 400 WPM"),
+                                timeout = 1,
+                            })
+                        end,
+                    },
+                    {
+                        text = _("500 WPM (Ultra fast)"),
+                        callback = function()
+                            self.rsvp_speed = 500
+                            self:saveSettings()
+                            UIManager:show(InfoMessage:new{
+                                text = _("RSVP speed set to 500 WPM"),
+                                timeout = 1,
                             })
                         end,
                     },
