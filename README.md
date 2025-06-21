@@ -1,50 +1,24 @@
 # FastReader Plugin for KOReader
 
-An RSVP (Rapid Serial Visual Presentation) plugin that enables speed reading with advanced features for KOReader.
+A powerful RSVP (Rapid Serial Visual Presentation) plugin that enables speed reading with advanced features for KOReader.
 
 ## Features
 
-### 🚀 **Tap-to-Launch RSVP**
-- Tap directly on text to instantly start RSVP reading
-- No need to navigate through menus - just tap and read
-- Works with any document type (PDF, EPUB, etc.)
-- Can be enabled/disabled in settings
+- Tap-to-Launch RSVP: Tap directly on text to instantly start RSVP reading
+- Resume Reading: Automatically remembers your last reading position on each page
+- Flexible Speed Control: Adjustable reading speed from 50 to 1000 WPM
+- Multi-Word Preview: Display multiple words simultaneously (1-10 words configurable)
+- Fixed-Width Display: Stable reading widget that doesn't "jump" between words
+- Position Tracking: Visual indicator shows reading progress when resuming
+- Seamless Page Transitions: Automatically continues to next page when reaching end
 
-### 📖 **Resume Reading**
-- Automatically remembers your last reading position on each page
-- Resume from exactly where you left off when restarting RSVP
-- Smart page tracking works with both paged and continuous documents
-- Visual progress indicator shows current word position
+## Screenshots
 
-### ⚡ **Flexible Speed Control**
-- Adjustable reading speed from 50 to 1000 WPM
-- Custom speed input with spin widget
-- Quick presets: 100, 150, 200, 250, 300, 400, 500 WPM
-- Real-time speed adjustment without interrupting reading
+### RSVP Reading Widget
+![RSVP Widget](rsvp.gif)
 
-### 👁️ **Multi-Word Preview**
-- Display multiple words simultaneously (1-10 words configurable)
-- Current word highlighted in bold black text
-- Upcoming words shown in gray for context
-- Customizable preview count in settings
-
-### 🎯 **Fixed-Width Display**
-- Stable reading widget that doesn't "jump" between words
-- Consistent positioning prevents eye strain
-- Professional white background with clean borders
-- Optimized for extended reading sessions
-
-### 📍 **Position Tracking**
-- Visual indicator shows reading progress when resuming
-- Format: [current_word/total_words] (e.g., [42/156])
-- Appears for 3 seconds when resuming on the same page
-- Can be toggled on/off in settings
-
-### 🔄 **Seamless Page Transitions**
-- Automatically continues to next page when reaching end
-- Works with both PDF pages and EPUB sections
-- Smooth transition without interrupting reading flow
-- Maintains reading speed across page boundaries
+### Settings Menu
+![Settings Menu](settings.png)
 
 ## Installation
 
