@@ -22,9 +22,9 @@ A powerful RSVP (Rapid Serial Visual Presentation) plugin that enables speed rea
 
 ## Installation
 
-1. Copy the `fastreader.koplugin` folder to your KOReader plugins directory
+1. Copy the repo contents (or just `main.lua` and `_meta.lua`) to `fastreader.koplugin` folder in your KOReader plugins directory
 2. Restart KOReader
-3. Enable the plugin in Settings → Plugins → FastReader
+3. Enable the plugin in Settings → More Tools -> Plugins → FastReader
 
 ## Usage
 
