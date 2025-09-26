@@ -8,6 +8,7 @@ A powerful RSVP (Rapid Serial Visual Presentation) plugin that enables speed rea
 - Resume Reading: Automatically remembers your last reading position on each page
 - Flexible Speed Control: Adjustable reading speed from 50 to 1000 WPM
 - Multi-Word Preview: Display multiple words simultaneously (1-10 words configurable)
+- Optimal View Point Alignment: Optionally anchor each word on a focus crosshair for faster fixation
 - Fixed-Width Display: Stable reading widget that doesn't "jump" between words
 - Position Tracking: Visual indicator shows reading progress when resuming
 - Seamless Page Transitions: Automatically continues to next page when reaching end
@@ -31,8 +32,9 @@ A powerful RSVP (Rapid Serial Visual Presentation) plugin that enables speed rea
 ### Quick Start
 1. **Enable Tap-to-Launch**: Settings → FastReader → "Tap on Text to Launch RSVP"
 2. **Set your speed**: Settings → FastReader → "RSVP Speed"
-3. **Tap on any text** to start speed reading
-4. **Tap the reading widget** to stop
+3. *(Optional)* Enable or disable the "Optimal Alignment (OVP)" toggle to choose between centered words and crosshair alignment
+4. **Tap on any text** to start speed reading
+5. **Tap the reading widget** to stop
 
 ### Manual Start
 - Go to Settings → FastReader → "Start/Stop RSVP"
@@ -51,6 +53,7 @@ A powerful RSVP (Rapid Serial Visual Presentation) plugin that enables speed rea
 - **Tap on Text to Launch RSVP**: Enable/disable tap-to-start functionality
 - **Show Reading Position**: Toggle position indicator when resuming
 - **Preview Words**: Set number of words to display (1-10)
+- **Optimal Alignment (OVP)**: Align words around the focus crosshair (monospace) or center them with standard spacing
 - **RSVP Speed**: Comprehensive speed control options
 
 ### Speed Presets

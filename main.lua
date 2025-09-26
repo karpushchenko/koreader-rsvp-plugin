@@ -20,13 +20,16 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local OverlapGroup = require("ui/widget/overlapgroup")
+local LineWidget = require("ui/widget/linewidget")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
+local RenderText = require("ui/rendertext")
 local Blitbuffer = require("ffi/blitbuffer")
 local Screen = require("device").screen
 local logger = require("logger")
 local LuaSettings = require("luasettings")
 local DataStorage = require("datastorage")
+local util = require("util")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -59,6 +62,13 @@ function FastReader:init()
     self.words = {}
     self.original_view_mode = nil
     
+    local ovp_setting = self.settings:readSetting("ovp_alignment_enabled")
+    if ovp_setting == nil then
+        self.ovp_alignment_enabled = true
+    else
+        self.ovp_alignment_enabled = ovp_setting
+    end
+
     -- Position tracking for resume functionality
     self.last_page_hash = nil -- Hash to identify current page content
     self.last_word_index = 1  -- Last read word index on this page
@@ -79,6 +89,7 @@ function FastReader:saveSettings()
         self.settings:saveSetting("tap_to_launch_enabled", self.tap_to_launch_enabled)
         self.settings:saveSetting("show_position_indicator", self.show_position_indicator)
         self.settings:saveSetting("words_preview_count", self.words_preview_count)
+        self.settings:saveSetting("ovp_alignment_enabled", self.ovp_alignment_enabled)
         self.settings:flush()
     end
 end
@@ -235,11 +246,61 @@ function FastReader:extractWordsFromCurrentPage()
     return words
 end
 
+local function getOptimalRecognitionIndex(char_count)
+    if char_count <= 1 then
+        return 1
+    elseif char_count == 2 then
+        return 1
+    elseif char_count == 3 then
+        return 2
+    elseif char_count == 4 then
+        return 2
+    elseif char_count == 5 then
+        return 3
+    elseif char_count == 6 then
+        return 3
+    elseif char_count == 7 then
+        return 4
+    elseif char_count == 8 then
+        return 4
+    end
+    return 5
+end
+
+local function measureTextWidth(face, text, bold)
+    if not text or text == "" then
+        return 0
+    end
+    local metrics = RenderText:sizeUtf8Text(0, Screen:getWidth(), face, text, true, bold)
+    return math.floor(metrics.x or 0)
+end
+
+local function calculateAnchorOffset(word, face, bold)
+    if not word or word == "" then
+        return 0, 1
+    end
+
+    local chars = util.splitToChars(word)
+    local char_count = #chars
+    if char_count == 0 then
+        return 0, 1
+    end
+
+    local ovp_index = getOptimalRecognitionIndex(char_count)
+    local prefix_text = table.concat(chars, "", 1, ovp_index - 1)
+    local key_char = chars[ovp_index] or ""
+
+    local prefix_width = measureTextWidth(face, prefix_text, bold)
+    local key_width = measureTextWidth(face, key_char, bold)
+
+    return prefix_width + (key_width / 2), ovp_index
+end
+
 function FastReader:showRSVPWord(current_word)
     if not current_word or current_word == "" then
         return
     end
-    
+
     -- Create multi-word display with current word highlighted
     local Screen = require("device").screen
     
@@ -252,46 +313,195 @@ function FastReader:showRSVPWord(current_word)
         end
     end
     
-    -- Fixed dimensions for stable display - make it wider to fit more words
-    local fixed_width = math.floor(Screen:getWidth() * 0.9)
+    -- Fixed dimensions for stable display; tighten frame when showing fewer words
+    local width_ratio = (self.words_preview_count <= 2) and 0.7 or 0.9
+    local fixed_width = math.floor(Screen:getWidth() * width_ratio)
+    local max_width = math.max(Screen:getWidth() - Screen:scaleBySize(40), Screen:scaleBySize(220))
+    local min_width = math.min(Screen:scaleBySize(320), max_width)
+    fixed_width = math.max(fixed_width, min_width)
+    fixed_width = math.min(fixed_width, max_width)
     local fixed_height = Screen:scaleBySize(120)
     local text_padding = Screen:scaleBySize(20)
-    
-    -- Create separate widgets for each word to avoid overlap
-    local word_widgets = {}
-    
+    local inner_width = fixed_width - (text_padding * 2)
+    local inner_height = fixed_height - (text_padding * 2)
+    local base_font_name = self.ovp_alignment_enabled and "infont" or "cfont"
+    local anchor_face = Font:getFace(base_font_name, 28)
+    local secondary_face = Font:getFace(base_font_name, 24)
+    local inter_word_gap = Screen:scaleBySize(15)
+    local min_left_padding = Screen:scaleBySize(20)
+    local base_right_padding = self.words_preview_count <= 2 and Screen:scaleBySize(140) or Screen:scaleBySize(180)
+    base_right_padding = math.max(Screen:scaleBySize(80), math.min(base_right_padding, math.floor(inner_width * 0.6)))
+    local anchor_offset = self.ovp_alignment_enabled and calculateAnchorOffset(current_word, anchor_face, true) or 0
+
+    -- Desired anchor position from the left edge of the inner area
+    local anchor_target
+    if self.ovp_alignment_enabled then
+        local target_limit = Screen:scaleBySize(self.words_preview_count <= 2 and 90 or 140)
+        anchor_target = math.min(inner_width - base_right_padding, target_limit)
+        anchor_target = math.max(anchor_target, Screen:scaleBySize(90))
+    else
+        anchor_target = math.floor(inner_width / 2)
+    end
+
+    local leading_padding = 0
+    if self.ovp_alignment_enabled then
+        leading_padding = math.max(anchor_target - anchor_offset, 0)
+    else
+        leading_padding = math.max(math.floor((inner_width - base_right_padding) * 0.2), min_left_padding)
+    end
+
+    local layout_items = {}
+    local total_content_width = leading_padding
+    if leading_padding > 0 then
+        table.insert(layout_items, {
+            widget = HorizontalSpan:new{ width = leading_padding },
+            width = leading_padding,
+            removable = false,
+            is_spacing = true,
+            is_leading = true,
+        })
+    end
+
     for i, word in ipairs(preview_words) do
-        local is_current = (i == 1) -- First word is current
-        
-        -- Try using a more visible color for non-current words
+        local is_current = (i == 1)
         local word_color = is_current and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_DARK_GRAY
-        
+
         local word_widget = TextWidget:new{
             text = word,
-            face = Font:getFace("cfont", is_current and 28 or 24),
+            face = is_current and anchor_face or secondary_face,
             bold = is_current,
             fgcolor = word_color,
         }
-        
-        table.insert(word_widgets, word_widget)
-        
-        -- Add space between words (except after last word)
+
+        local widget_width = word_widget:getSize().w
+        table.insert(layout_items, {
+            widget = word_widget,
+            width = widget_width,
+            removable = (i > 1),
+            is_spacing = false,
+            is_word = true,
+        })
+        total_content_width = total_content_width + widget_width
+
         if i < #preview_words then
-            table.insert(word_widgets, HorizontalSpan:new{ width = Screen:scaleBySize(15) })
+            table.insert(layout_items, {
+                widget = HorizontalSpan:new{ width = inter_word_gap },
+                width = inter_word_gap,
+                removable = true,
+                is_spacing = true,
+            })
+            total_content_width = total_content_width + inter_word_gap
         end
     end
-    
+
+    local max_allowed_width = inner_width - base_right_padding
+    local idx = #layout_items
+    while idx >= 1 and total_content_width > max_allowed_width do
+        local item = layout_items[idx]
+        if item.removable then
+            total_content_width = total_content_width - item.width
+            table.remove(layout_items, idx)
+            if item.is_word then
+                local prev = layout_items[idx - 1]
+                if prev and prev.is_spacing and not prev.is_leading then
+                    total_content_width = total_content_width - prev.width
+                    table.remove(layout_items, idx - 1)
+                    idx = idx - 1
+                end
+            end
+        end
+        idx = idx - 1
+    end
+
+    -- Ensure we never exceed inner width
+    if total_content_width > inner_width then
+        local overflow = total_content_width - inner_width
+        local lead_item = layout_items[1]
+        if lead_item and lead_item.is_leading then
+            local trimmed = math.min(lead_item.width - min_left_padding, overflow)
+            if trimmed > 0 then
+                lead_item.width = lead_item.width - trimmed
+                lead_item.widget.width = lead_item.width
+                total_content_width = total_content_width - trimmed
+            end
+        end
+    end
+
+    local applied_leading = 0
+    if layout_items[1] and layout_items[1].is_leading then
+        applied_leading = layout_items[1].width
+    end
+
+    local word_widgets = {}
+    for _, item in ipairs(layout_items) do
+        table.insert(word_widgets, item.widget)
+    end
+
     -- Create horizontal group containing all words
     local words_group = HorizontalGroup:new{
         align = "center",
+        allow_mirroring = false,
     }
-    
+
     -- Add all word widgets to the group
     for _, widget in ipairs(word_widgets) do
         table.insert(words_group, widget)
     end
-    
-    -- Left-aligned container with fixed width
+
+    -- Overlay crosshair aligned to the optimal recognition point
+    local word_container = LeftContainer:new{
+        allow_mirroring = false,
+        dimen = Geom:new{
+            w = inner_width,
+            h = inner_height,
+        },
+        words_group,
+    }
+
+    local inner_overlap = OverlapGroup:new{
+        allow_mirroring = false,
+        dimen = Geom:new{
+            w = inner_width,
+            h = inner_height,
+        },
+    }
+
+    if self.ovp_alignment_enabled then
+        local crosshair_width = math.max(Screen:scaleBySize(1), 1)
+        local crosshair_height = inner_height
+        local crosshair_center = applied_leading + anchor_offset
+        local crosshair_x_offset = math.floor(crosshair_center - (crosshair_width / 2))
+        crosshair_x_offset = math.max(0, math.min(inner_width - crosshair_width, crosshair_x_offset))
+
+        local vertical_crosshair = LineWidget:new{
+            background = Blitbuffer.COLOR_LIGHT_GRAY,
+            dimen = Geom:new{
+                w = crosshair_width,
+                h = crosshair_height,
+            },
+        }
+        vertical_crosshair.overlap_offset = {crosshair_x_offset, 0}
+        table.insert(inner_overlap, vertical_crosshair)
+
+        local horizontal_width = math.min(Screen:scaleBySize(30), inner_width)
+        local horizontal_height = math.max(Screen:scaleBySize(1), 1)
+        local horizontal_crosshair = LineWidget:new{
+            background = Blitbuffer.COLOR_LIGHT_GRAY,
+            dimen = Geom:new{
+                w = horizontal_width,
+                h = horizontal_height,
+            },
+        }
+        local horizontal_x = math.floor(crosshair_x_offset + (crosshair_width / 2) - (horizontal_width / 2))
+        horizontal_x = math.max(0, math.min(inner_width - horizontal_width, horizontal_x))
+        local horizontal_y = math.floor((inner_height / 2) - (horizontal_height / 2))
+        horizontal_crosshair.overlap_offset = {horizontal_x, horizontal_y}
+        table.insert(inner_overlap, horizontal_crosshair)
+    end
+
+    table.insert(inner_overlap, word_container)
+
+    -- Enclose in frame and keep widget centered on screen
     local frame = FrameContainer:new{
         background = Blitbuffer.COLOR_WHITE,
         bordersize = 2,
@@ -299,13 +509,7 @@ function FastReader:showRSVPWord(current_word)
         margin = 0,
         width = fixed_width,
         height = fixed_height,
-        LeftContainer:new{
-            dimen = Geom:new{
-                w = fixed_width - (text_padding * 2),
-                h = fixed_height - (text_padding * 2),
-            },
-            words_group,
-        },
+        inner_overlap,
     }
     
     -- Center the fixed-width frame on screen
@@ -609,6 +813,29 @@ function FastReader:addToMainMenu(menu_items)
                     end
                 end,
                 help_text = _("When enabled, shows reading position indicator when resuming RSVP on the same page."),
+            },
+            {
+                text = _("Optimal Alignment (OVP)"),
+                checked_func = function()
+                    return self.ovp_alignment_enabled
+                end,
+                callback = function()
+                    self.ovp_alignment_enabled = not self.ovp_alignment_enabled
+                    self:saveSettings()
+
+                    if self.ovp_alignment_enabled then
+                        UIManager:show(InfoMessage:new{
+                            text = _("Optimal alignment enabled. Words align to the focus crosshair."),
+                            timeout = 3,
+                        })
+                    else
+                        UIManager:show(InfoMessage:new{
+                            text = _("Optimal alignment disabled. Words center in the widget."),
+                            timeout = 3,
+                        })
+                    end
+                end,
+                help_text = _("Aligns each word to its optimal recognition point and shows the subtle crosshair guide."),
             },
             {
                 text_func = function()
