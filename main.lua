@@ -54,6 +54,7 @@ function FastReader:init()
     -- RSVP state
     self.rsvp_enabled = false
     self.rsvp_timer = nil
+    self.pending_resume_task = nil
     
     -- Tap-to-launch RSVP settings
     self.tap_to_launch_enabled = self.settings:readSetting("tap_to_launch_enabled") or false
@@ -598,9 +599,15 @@ function FastReader:startRSVP()
     logger.info("FastReader: RSVP interval set to " .. interval .. "ms for " .. self.rsvp_speed .. " WPM")
     
     -- Start RSVP timer
-    self.rsvp_timer = UIManager:scheduleIn(interval / 1000, function()
+    if self.rsvp_timer then
+        UIManager:unschedule(self.rsvp_timer)
+        self.rsvp_timer = nil
+    end
+    self.rsvp_timer = function()
+        self.rsvp_timer = nil
         self:rsvpTick()
-    end)
+    end
+    UIManager:scheduleIn(interval / 1000, self.rsvp_timer)
     
     -- Show first word
     self:showRSVPWord(self.words[self.current_word_index])
@@ -627,10 +634,19 @@ function FastReader:stopRSVP()
         UIManager:unschedule(self.rsvp_timer)
         self.rsvp_timer = nil
     end
+
+    if self.pending_resume_task then
+        UIManager:unschedule(self.pending_resume_task)
+        self.pending_resume_task = nil
+    end
     
     -- Remove RSVP widget
     if self.rsvp_widget then
-        UIManager:close(self.rsvp_widget)
+        local refresh_region
+        if self.rsvp_widget.dimen then
+            refresh_region = self.rsvp_widget.dimen
+        end
+        UIManager:close(self.rsvp_widget, "ui", refresh_region)
         self.rsvp_widget = nil
     end
     
@@ -642,6 +658,7 @@ function FastReader:stopRSVP()
     
     UIManager:show(InfoMessage:new{
         text = _("RSVP stopped"),
+        timeout = 1.5,
     })
 end
 
@@ -658,9 +675,15 @@ function FastReader:rsvpTick()
         
         -- Schedule next tick
         local interval = 60000 / self.rsvp_speed
-        self.rsvp_timer = UIManager:scheduleIn(interval / 1000, function()
+        if self.rsvp_timer then
+            UIManager:unschedule(self.rsvp_timer)
+            self.rsvp_timer = nil
+        end
+        self.rsvp_timer = function()
+            self.rsvp_timer = nil
             self:rsvpTick()
-        end)
+        end
+        UIManager:scheduleIn(interval / 1000, self.rsvp_timer)
     else
         -- End of current page reached, try to go to next page
         logger.info("FastReader: End of current page, attempting to go to next page")
@@ -716,13 +739,21 @@ function FastReader:goToNextPageAndContinueRSVP()
     
     if success then
         -- Small delay to let the page render, then extract words and continue
-        UIManager:scheduleIn(0.1, function()
+        if self.pending_resume_task then
+            UIManager:unschedule(self.pending_resume_task)
+        end
+        self.pending_resume_task = function()
+            self.pending_resume_task = nil
             self:continueRSVPWithNewPage()
-        end)
+        end
+        UIManager:scheduleIn(0.1, self.pending_resume_task)
     end
 end
 
 function FastReader:continueRSVPWithNewPage()
+    if not self.rsvp_enabled then
+        return
+    end
     -- Extract words from new page/position
     local new_words = self:extractWordsFromCurrentPage()
     
@@ -739,9 +770,15 @@ function FastReader:continueRSVPWithNewPage()
         
         -- Schedule next tick
         local interval = 60000 / self.rsvp_speed
-        self.rsvp_timer = UIManager:scheduleIn(interval / 1000, function()
+        if self.rsvp_timer then
+            UIManager:unschedule(self.rsvp_timer)
+            self.rsvp_timer = nil
+        end
+        self.rsvp_timer = function()
+            self.rsvp_timer = nil
             self:rsvpTick()
-        end)
+        end
+        UIManager:scheduleIn(interval / 1000, self.rsvp_timer)
     else
         logger.warn("FastReader: No words extracted from new page, trying next page")
         -- Try one more page if this one is empty
@@ -1011,9 +1048,11 @@ function FastReader:onKeyPress(key)
             })
         else
             local interval = 60000 / self.rsvp_speed
-            self.rsvp_timer = UIManager:scheduleIn(interval / 1000, function()
+            self.rsvp_timer = function()
+                self.rsvp_timer = nil
                 self:rsvpTick()
-            end)
+            end
+            UIManager:scheduleIn(interval / 1000, self.rsvp_timer)
             UIManager:show(InfoMessage:new{
                 text = _("RSVP resumed"),
                 timeout = 1,
@@ -1193,9 +1232,15 @@ function FastReader:showPositionIndicator()
     UIManager:show(self.position_indicator_widget)
     
     -- Auto-hide after 3 seconds
-    self.indicator_timer = UIManager:scheduleIn(3, function()
+    if self.indicator_timer then
+        UIManager:unschedule(self.indicator_timer)
+        self.indicator_timer = nil
+    end
+    self.indicator_timer = function()
+        self.indicator_timer = nil
         self:hidePositionIndicator()
-    end)
+    end
+    UIManager:scheduleIn(3, self.indicator_timer)
 end
 
 function FastReader:hidePositionIndicator()
