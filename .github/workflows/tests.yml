@@ -1,0 +1,64 @@
+name: Tests
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        lua: [lua5.1, luajit]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Lua runtimes and Busted
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1 luajit liblua5.1-0-dev luarocks
+          sudo luarocks --lua-version=5.1 install busted 2.3.0
+          sudo luarocks --lua-version=5.1 install luacov 0.17.0
+      - name: Syntax, Busted unit tests and LuaCov coverage
+        run: |
+          eval "$(luarocks --lua-version=5.1 path)"
+          make check LUA=${{ matrix.lua }}
+          make test LUA=${{ matrix.lua }} TEST_ARGS="--shuffle --repeat=3"
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container: koreader/kobase:5.0.0-22.04
+    env:
+      PARALLEL_JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout the tested KOReader revision
+        uses: actions/checkout@v4
+        with:
+          repository: koreader/koreader
+          ref: b539d24b97e52845841af6d7bb521cbba64e34dd
+          path: .koreader-upstream
+          submodules: recursive
+      - name: Cache native dependencies
+        uses: actions/cache@v4
+        with:
+          path: .koreader-upstream/base/build
+          key: koreader-native-b539d24b97e52845841af6d7bb521cbba64e34dd-v1
+      - name: Build the KOReader emulator
+        working-directory: .koreader-upstream
+        run: ./kodev build
+      - name: Run real KOReader integration specs through Meson and LuaCov
+        run: make integration-coverage KOREADER_DIR="$GITHUB_WORKSPACE/.koreader-upstream"
+      - name: Repeat native specs in shuffled order through Busted
+        run: |
+          make integration KOREADER_DIR="$GITHUB_WORKSPACE/.koreader-upstream" \
+            INTEGRATION_ARGS="--busted -- --busted=--shuffle --busted=--repeat=3"
+      - name: Upload native coverage and Meson logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-koreader-results
+          path: coverage/koreader/
+          if-no-files-found: ignore

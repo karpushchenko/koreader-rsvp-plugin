@@ -107,6 +107,24 @@ This plugin is distributed under the same license as KOReader.
 
 Contributions are welcome! Please submit issues and pull requests through the appropriate channels.
 
+Tests use Busted/Luassert and LuaCov, following KOReader's test conventions.
+From the plugin directory:
+
+```sh
+make test                      # isolated Busted specs (LuaJIT by default)
+make test LUA=lua5.1
+make coverage                  # LuaCov report
+make integration               # native KOReader specs via its Meson/Busted runner
+make check-all                 # syntax, unit tests, coverage and native integration
+```
+
+The isolated specs need Busted and LuaCov for Lua 5.1. Native integration also
+needs a built KOReader emulator and Python 3; it runs headlessly with real
+ReaderUI, document providers, widgets and UIManager in a temporary environment.
+Set `KOREADER_DIR=/path/to/koreader` if the plugin is outside that checkout.
+GitHub Actions runs both layers. See [Testing](docs/testing.md) for dependency
+setup, upstream test discovery and the remaining device checks.
+
 ---
 
 **Enjoy your enhanced reading experience with FastReader!** 📚⚡

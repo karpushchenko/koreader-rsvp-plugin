@@ -75,7 +75,8 @@ function FastReader:init()
     -- Position tracking for resume functionality
     self.last_page_hash = nil -- Hash to identify current page content
     self.last_word_index = 1  -- Last read word index on this page
-    self.show_position_indicator = self.settings:readSetting("show_position_indicator") or true
+    local indicator_setting = self.settings:readSetting("show_position_indicator")
+    self.show_position_indicator = indicator_setting ~= false
     
     -- Multi-word display settings
     self.words_preview_count = self.settings:readSetting("words_preview_count") or 3 -- Show current + 2 next words
@@ -179,9 +180,12 @@ function FastReader:extractWordsFromCurrentPage()
                 if self.ui.rolling and self.ui.document.getTextFromXPointers then
                     local current_xpointer = self.ui.rolling:getBookLocation()
                     if current_xpointer then
-                        local text_result = self.ui.document:getTextFromXPointers(current_xpointer, current_xpointer, true)
-                        if text_result and text_result.text and text_result.text ~= "" then
-                            return text_result.text
+                        -- This API returns a string; its flag enables drawing
+                        -- a selection (unlike getTextFromPositions).
+                        local text_result = self.ui.document:getTextFromXPointers(
+                            current_xpointer, current_xpointer, false)
+                        if type(text_result) == "string" and text_result ~= "" then
+                            return text_result
                         end
                     end
                 end
@@ -206,6 +210,19 @@ function FastReader:extractWordsFromCurrentPage()
         
         if page and self.ui.document.getPageText then
             local success, page_text = pcall(self.ui.document.getPageText, self.ui.document, page)
+            if success and type(page_text) == "table" then
+                -- MuPDF returns lines of word boxes, with geometry alongside
+                -- the array entries. Keep their order and ignore that metadata.
+                local page_words = {}
+                for _, line in ipairs(page_text) do
+                    for _, word_box in ipairs(line) do
+                        if word_box.word then
+                            table.insert(page_words, word_box.word)
+                        end
+                    end
+                end
+                page_text = table.concat(page_words, " ")
+            end
             if success and page_text and page_text ~= "" then
                 text = page_text
                 table.insert(debug_info, "SUCCESS: getPageText returned " .. string.len(page_text) .. " chars")
@@ -379,6 +396,13 @@ end
 function RSVPWidget:onClose()
     self.plugin:stopRSVP()
     return true
+end
+
+function RSVPWidget:onKeyPress(key)
+    if self.plugin:onKeyPress(key) then
+        return true
+    end
+    return InputContainer.onKeyPress(self, key)
 end
 
 function RSVPWidget:freeWidgets()
@@ -750,8 +774,10 @@ function FastReader:goToNextPageAndContinueRSVP()
         -- For reflowable documents (EPUB, FB2, etc.)
         -- Try to scroll down by one screen
         local Event = require("ui/event")
+        local previous_page_hash = self:getCurrentPageHash()
         local ret = self.ui:handleEvent(Event:new("GotoViewRel", 1))
-        if ret then
+        -- ReaderRolling consumes this event even when already at the end.
+        if ret and self:getCurrentPageHash() ~= previous_page_hash then
             success = true
             logger.info("FastReader: Scrolled to next screen in rolling mode")
         else
@@ -1065,6 +1091,10 @@ function FastReader:onKeyPress(key)
     if not self.rsvp_enabled then
         return false
     end
+
+    if type(key) == "table" then
+        key = key.key
+    end
     
     if key == "Menu" or key == "Back" then
         self:stopRSVP()
@@ -1212,6 +1242,7 @@ end
 function FastReader:shouldResumeFromLastPosition()
     local current_hash = self:getCurrentPageHash()
     return self.last_page_hash == current_hash and self.last_word_index > 1
+        and self.last_word_index <= #self.words
 end
 
 function FastReader:updateLastReadPosition()
