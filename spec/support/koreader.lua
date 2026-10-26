@@ -166,12 +166,22 @@ function Harness.new(options)
         end
     end
     modules.logger = logger
-    local environment = setmetatable({ require = function(name)
+    local private_modules = {}
+    local environment
+    environment = setmetatable({ require = function(name)
         if options.legacy_input and name == "ui/widget/container/inputcontainer" then
             error("module unavailable on this KOReader version")
         end
-        assert(modules[name], "unconfigured KOReader dependency: " .. name)
-        return modules[name]
+        if modules[name] ~= nil then return modules[name] end
+        if name:match("^fastreader/[%w_]+$") then
+            if private_modules[name] == nil then
+                local module_chunk = assert(loadfile(name .. ".lua"))
+                setfenv(module_chunk, environment)
+                private_modules[name] = module_chunk()
+            end
+            return private_modules[name]
+        end
+        error("unconfigured KOReader dependency: " .. name)
     end }, { __index = _G })
     local chunk = assert(loadfile(os.getenv("FASTREADER_SOURCE") or "main.lua"))
     setfenv(chunk, environment)

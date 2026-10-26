@@ -17,14 +17,16 @@ A powerful RSVP (Rapid Serial Visual Presentation) plugin that enables speed rea
 
 ### RSVP Reading Widget
 ![RSVP Widget](rsvp.gif)
-Reading on 400 words per second 
+Reading at 400 words per minute
 
 ### Settings Menu
 ![Settings Menu](settings.png)
 
 ## Installation
 
-1. Copy the repo contents (or just `main.lua` and `_meta.lua`) to `fastreader.koplugin` folder in your KOReader plugins directory
+1. Run `make package` and extract `dist/fastreader.koplugin.zip` into KOReader's
+   `plugins/` directory. For a source installation, copy `main.lua`, `_meta.lua`
+   and the complete `fastreader/` directory into `plugins/fastreader.koplugin/`.
 2. Restart KOReader
 3. Enable the plugin in Settings → More Tools -> Plugins → FastReader
 
@@ -101,7 +103,19 @@ Reading on 400 words per second
 
 ## License
 
-This plugin is distributed under the same license as KOReader.
+This plugin is distributed under the [MIT License](LICENSE).
+
+## Plugin metadata and updates
+
+`_meta.lua` contains the display name, RSVP description, literal version, author,
+MIT license and repository URL. KOReader uses the display metadata; ZenPM reads
+the literal version when identifying an installed plugin. A `-dev` suffix marks
+an unreleased development build.
+
+ZenPM's catalog metadata comes from its repository index. The plugin is already
+listed there as `koreader-rsvp-plugin`; adding fields locally does not publish a
+GitHub release or replace the catalog's source-package version. Release archives
+use a single `fastreader.koplugin/` directory with all runtime modules.
 
 ## Contributing
 
@@ -115,7 +129,8 @@ make test                      # isolated Busted specs (LuaJIT by default)
 make test LUA=lua5.1
 make coverage                  # LuaCov report
 make integration               # native KOReader specs via its Meson/Busted runner
-make check-all                 # syntax, unit tests, coverage and native integration
+make check-all                 # lint, syntax, unit/real KOReader tests and installed ZIP
+make package-check             # build ZIP and test the extracted installation
 ```
 
 The isolated specs need Busted and LuaCov for Lua 5.1. Native integration also
@@ -124,6 +139,8 @@ ReaderUI, document providers, widgets and UIManager in a temporary environment.
 Set `KOREADER_DIR=/path/to/koreader` if the plugin is outside that checkout.
 GitHub Actions runs both layers. See [Testing](docs/testing.md) for dependency
 setup, upstream test discovery and the remaining device checks.
+Runtime responsibilities are split under `fastreader/`; `main.lua` keeps the
+KOReader entry points. Contributor and release requirements are in [AGENTS.md](AGENTS.md).
 
 ---
 

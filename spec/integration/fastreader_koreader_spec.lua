@@ -108,6 +108,12 @@ describe("FastReader KOReader integration #integration", function()
                 assert.is.table(plugin)
                 assert.are.equal(reader, plugin.ui)
                 assert.are.equal("readerfastreader", plugin.name)
+                local meta = dofile("plugins/fastreader.koplugin/_meta.lua")
+                for _, field in ipairs({ "fullname", "description", "version",
+                    "author", "license", "url" }) do
+                    assert.is.string(meta[field])
+                    assert.are.equal(meta[field], plugin[field])
+                end
                 assert.is.truthy(reader._zones.fastreader_tap_to_launch)
                 if kind == "epub" then assert.is.truthy(reader.rolling)
                 else assert.is.truthy(reader.paging) end

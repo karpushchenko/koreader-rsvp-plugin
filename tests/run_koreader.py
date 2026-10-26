@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import zipfile
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -36,7 +37,7 @@ def find_runtime(root, requested):
     )
 
 
-def stage(root, runtime, destination):
+def stage(root, runtime, destination, plugin=PLUGIN):
     # Read-only assets stay symlinked. Every writable directory lives under the
     # temporary destination. In particular, never use the user's KO_HOME.
     for name in ("luajit", "common", "libs", "ffi", "fonts", "resources",
@@ -44,7 +45,7 @@ def stage(root, runtime, destination):
         link(runtime / name, destination / name)
     (destination / "cache").mkdir()
     (destination / "plugins").mkdir()
-    link(PLUGIN, destination / "plugins/fastreader.koplugin")
+    link(plugin, destination / "plugins/fastreader.koplugin")
     spec = destination / "spec"
     unit = spec / "front/unit"
     unit.mkdir(parents=True)
@@ -66,6 +67,7 @@ def main():
     parser.add_argument("--runtime", help="Built emulator's koreader directory")
     parser.add_argument("--busted", action="store_true", help="Use upstream Busted fallback")
     parser.add_argument("--coverage", action="store_true")
+    parser.add_argument("--plugin-zip", help="Test an installed release ZIP instead of source")
     parser.add_argument("--coverage-dir", default=str(PLUGIN / "coverage/koreader"))
     parser.add_argument("args", nargs=argparse.REMAINDER, help="Extra upstream runner arguments")
     options = parser.parse_args()
@@ -73,7 +75,22 @@ def main():
     runtime = find_runtime(root, options.runtime)
     with tempfile.TemporaryDirectory(prefix="fastreader-koreader-") as directory:
         destination = Path(directory)
-        stage(root, runtime, destination)
+        plugin = PLUGIN
+        if options.plugin_zip:
+            installation = destination / "installation"
+            installation.mkdir()
+            with zipfile.ZipFile(options.plugin_zip) as archive:
+                for name in archive.namelist():
+                    parts = Path(name).parts
+                    if not parts or parts[0] != "fastreader.koplugin" or ".." in parts:
+                        raise ValueError("ZIP must contain one fastreader.koplugin/ root")
+                    if len(parts) > 1 and parts[1] in ("spec", "tests", ".git", ".github"):
+                        raise ValueError("ZIP must exclude test and development files")
+                archive.extractall(installation)
+            plugin = installation / "fastreader.koplugin"
+            if not (plugin / "main.lua").is_file() or not (plugin / "_meta.lua").is_file():
+                raise ValueError("ZIP is missing main.lua or _meta.lua")
+        stage(root, runtime, destination, plugin)
         env = os.environ.copy()
         rocks = destination / "spec/rocks"
         env["LUA_PATH"] = (

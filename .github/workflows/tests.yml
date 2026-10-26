@@ -20,6 +20,7 @@ jobs:
           sudo apt-get install -y lua5.1 luajit liblua5.1-0-dev luarocks
           sudo luarocks --lua-version=5.1 install busted 2.3.0
           sudo luarocks --lua-version=5.1 install luacov 0.17.0
+          sudo luarocks --lua-version=5.1 install luacheck 1.2.0
       - name: Syntax, Busted unit tests and LuaCov coverage
         run: |
           eval "$(luarocks --lua-version=5.1 path)"
@@ -55,6 +56,8 @@ jobs:
         run: |
           make integration KOREADER_DIR="$GITHUB_WORKSPACE/.koreader-upstream" \
             INTEGRATION_ARGS="--busted -- --busted=--shuffle --busted=--repeat=3"
+      - name: Load the packaged plugin and run native integration
+        run: make package-check KOREADER_DIR="$GITHUB_WORKSPACE/.koreader-upstream"
       - name: Upload native coverage and Meson logs
         if: always()
         uses: actions/upload-artifact@v4

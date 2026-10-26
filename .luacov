@@ -2,6 +2,8 @@ local output = (os.getenv("KO_HOME") or ".") .. "/"
 return {
     statsfile = output .. "luacov.stats.out",
     reportfile = output .. "luacov.report.out",
-    include = { "main" },
+    include = { "^main$", "^_meta$", "^fastreader/",
+        "plugins/fastreader%.koplugin/main$", "plugins/fastreader%.koplugin/_meta$",
+        "plugins/fastreader%.koplugin/fastreader/" },
     exclude = { "spec/", "tests/" },
 }

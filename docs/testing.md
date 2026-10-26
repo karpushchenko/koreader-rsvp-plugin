@@ -11,6 +11,7 @@ Use Lua 5.1 or LuaJIT, Make and LuaRocks configured for Lua 5.1:
 ```sh
 luarocks --lua-version=5.1 install busted 2.3.0
 luarocks --lua-version=5.1 install luacov 0.17.0
+luarocks --lua-version=5.1 install luacheck 1.2.0
 eval "$(luarocks --lua-version=5.1 path)"
 ```
 
@@ -27,11 +28,14 @@ make test                           # LuaJIT, Busted unit specs
 make test LUA=lua5.1
 make test TEST_ARGS='--filter=resume --shuffle --repeat=3'
 make syntax                         # Lua 5.1 parse checks
+make lint                           # production and test Lua checks
 make coverage                       # LuaCov unit report
 make integration                    # real headless KOReader integration
 make integration-coverage           # native specs with LuaCov
-make check                          # syntax, unit tests and unit coverage
-make check-all                      # check plus native integration
+make package                        # dist/fastreader.koplugin.zip
+make package-check                  # native tests on an extracted ZIP installation
+make check                          # syntax, lint, unit tests and unit coverage
+make check-all                      # check, native integration and installed ZIP
 ```
 
 Failed assertions, setup errors and missing native dependencies return a nonzero
@@ -110,7 +114,8 @@ the temporary staging above supplies that registration for local and CI runs.
 
 The isolated tests retain explicit boundary doubles in `spec/support/koreader.lua`
 for speed and controlled failures. They load the real plugin in a fresh Lua
-environment; unknown dependencies fail. They do not validate the replacement
+environment, including a private cache of the `fastreader/` modules per harness;
+unknown dependencies fail. They do not validate the replacement
 APIs themselves. The native layer uses actual modules and only substitutes
 clock sources via upstream MockTime, plus a scoped primary-selection failure
 for the XPointer fallback case. It leaves the real UIManager scheduler intact.
@@ -123,7 +128,8 @@ production code. Run both layers after refactors.
 
 ## Coverage and CI
 
-Coverage is standard LuaCov, configured by `.luacov`. `make coverage` reports on
+Coverage is standard LuaCov, configured by `.luacov` to include `main.lua`,
+`_meta.lua` and every runtime module under `fastreader/`. `make coverage` reports on
 the isolated suite; `make integration-coverage` merges the native process stats
 using KOReader's own `merge_luacov_stats.lua` and generates a separate report.
 These percentages describe different test layers. They replace the earlier
@@ -132,9 +138,13 @@ custom compiler-line/debug-hook metric and are not directly comparable with it.
 GitHub Actions runs the unit specs on Lua 5.1 and LuaJIT. A separate job builds
 the pinned KOReader revision used for local verification, using KOReader's own
 build-container image, then runs native specs with coverage and repeated,
-shuffled execution. Native coverage and Meson logs are uploaded as an artifact.
+shuffled execution. It also runs the native specs against the actual ZIP built
+by `make package`, catching omitted modules and broken installed search paths.
+Native coverage and Meson logs are uploaded as an artifact.
 
-Lint the new Lua test code independently with:
+Run all Lua lint checks with `make lint`. Production lint preserves the existing
+gettext message IDs even when a literal exceeds 100 columns; test code enforces
+the 100-column limit. To lint the specs independently:
 
 ```sh
 luacheck --no-config --std luajit+busted --no-unused-args --no-self \
