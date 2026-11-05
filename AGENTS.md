@@ -1,7 +1,5 @@
 # FastReader contributor instructions
 
-@/home/karps/.codex/RTK.md
-
 ## Runtime layout and compatibility
 
 - `main.lua`: KOReader entry point, initialization, dispatcher and input handlers.
@@ -72,6 +70,5 @@ For a release:
    ZenPM's catalog is generated separately from installed-plugin metadata; this
    repository does not need its own ZenPM repository `manifest.json`.
 
-Before committing, verify author and committer use `theblackkarps@gmail.com`.
 Use concise imperative subjects and reference the relevant issue; preserve
 unrelated work in the shared checkout.
