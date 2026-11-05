@@ -1,0 +1,9 @@
+return {
+    default = {
+        ROOT = { "spec/unit" },
+        lpath = "./spec/?.lua;./spec/?/init.lua",
+        pattern = "_spec.lua$",
+        output = "utfTerminal",
+        verbose = true,
+    },
+}

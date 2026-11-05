@@ -1,6 +1,9 @@
 local _ = require("gettext")
 return {
-    name = "fastreader",
     fullname = _("FastReader"),
-    description = _([[Display reading progress (current page and percentage) at the bottom of the screen.]]),
+    description = _("RSVP speed reading with word previews, focus alignment, and resume."),
+    version = "1.0.2-dev",
+    author = "Ivan Karpushchenko",
+    license = "MIT",
+    url = "https://github.com/karpushchenko/koreader-rsvp-plugin",
 }
